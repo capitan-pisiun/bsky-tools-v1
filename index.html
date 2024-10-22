@@ -1,0 +1,373 @@
+<!doctype html>
+<html lang="uk">
+
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Аналітика підписників</title>
+
+        <style>
+          body {
+            margin: 24px;
+          }
+
+          button {
+            display: flex;
+            min-width: 145px;
+            padding: 6px;
+          }
+
+          form {
+            flex-direction: column;
+            margin-top: 28px;
+          }
+
+          form > div {
+            gap: 8px;
+          }
+
+          form,
+          div {
+            display: flex;
+          }
+
+          h2 {
+            margin-bottom: 12px;
+          }
+
+          h5 {
+            margin-bottom: 8px;
+            margin-top: 0;
+          }
+
+          h5,
+          li {
+            font-size: 16px;
+          }
+
+          img {
+            width: 50px;
+          }
+
+          label,
+          input {
+            display: flex;
+            margin-bottom: 8px;
+            min-width: 100px;
+          }
+
+          table {
+            border-collapse: collapse;
+          }
+
+          table,
+          th,
+          td {
+            border: 1px solid black;
+          }
+
+          td {
+            padding: 12px;
+          }
+
+          ul {
+            margin-bottom: 8px;
+            margin-top: 8px;
+          }
+
+          #analyze-block {
+            align-items: center;
+            gap: 16px;
+          }
+
+          #analyze-button-block {
+            display: none;
+          }
+
+          #analyze-button-block > button {
+            min-width: 185px;
+          }
+
+          #analyze-information-block {
+            color: red;
+          }
+
+          #session-information-block {
+            color: red;
+            display: none;
+            margin-left: 16px;
+            width: 80% !important;
+          }
+
+          #initialize-block {
+            align-items: baseline;
+            margin-bottom: 16px;
+            margin-top: 16px;
+          }
+
+          #spinner {
+            animation: spin 1s linear infinite;
+            border: 8px solid #f3f3f3;
+            border-top: 8px solid #3498db;
+            border-radius: 50%;
+            display: none;
+            height: 10px;
+            width: 10px;
+          }
+
+          #table-block {
+            margin-top: 24px;
+            text-align: center;
+          }
+
+          .td-name {
+            min-width: 200px;
+          }
+
+          @keyframes spin {
+            0% {
+              transform: rotate(0deg);
+            }
+
+            100% {
+              transform: rotate(360deg);
+            }
+          }
+        </style>
+    </head>
+
+    <body>
+        <h2>Аналітика підписників</h2>
+        <h5>v1.0.1</h5>
+        <h5>Developed by <a href="https://bsky.app/profile/pisiun.bsky.social"
+                            target="_blank">@pisiun.bsky.social</a>. All rights not reserved</h5>
+        <h5>Застереження</h5>
+        <ul>
+            <li>Користувачі які читають вас, але були заблоковані, не включені в аналіз</li>
+            <li>Користувачі яких читаєте ви, але які заблокували вас, не включені в аналіз</li>
+        </ul>
+
+        <form id="credentialsForm">
+            <div>
+                <label for="handle">Нікнейм:</label>
+                <input type="text" id="handle" name="handle" placeholder="все що після @" required>
+            </div>
+            <div>
+                <label for="appPassword">Пароль:</label>
+                <input type="password" id="appPassword" name="appPassword" placeholder="Settings > App Passwords"
+                       required>
+            </div>
+            <div id="initialize-block">
+                <button type="button" id="initializeButton" onclick="initializeSession()">Започаткувати сесію</button>
+                <div id="session-information-block"></div>
+            </div>
+
+        </form>
+        <div id="analyze-block">
+            <div id="analyze-button-block">
+                <button type="button" id="analyzeButton" onclick="analyze()">Шукати тих які відписалися</button>
+            </div>
+            <div id="spinner"></div>
+            <div id="analyze-information-block"></div>
+        </div>
+        <div id="table-block"></div>
+
+        <script>
+          document.addEventListener('DOMContentLoaded', function () {
+            if (localStorage.getItem('handle')) {
+              document.getElementById('handle').value = localStorage.getItem('handle');
+            }
+
+            if (localStorage.getItem('appPassword')) {
+              document.getElementById('appPassword').value = localStorage.getItem('appPassword');
+            }
+          });
+
+          async function analyze() {
+            document.getElementById('spinner').style.display = 'flex';
+
+            const handle = localStorage.getItem('handle');
+            const token = localStorage.getItem('token');
+
+            if (handle && token) {
+              const profile = await loadProfile(handle, token);
+
+              if (profile && profile['did']) {
+                const getFollowersUrl = 'https://bsky.social/xrpc/app.bsky.graph.getFollowers?';
+                const followers = await loadAllUsers(getFollowersUrl, profile['did'], token);
+
+                const getFollowingUrl = 'https://bsky.social/xrpc/app.bsky.graph.getFollows?';
+                const following = await loadAllUsers(getFollowingUrl, profile['did'], token);
+
+                const unfollowers = findUnfollowers(followers, following);
+
+                drawUnfollowersTable(unfollowers);
+              }
+            } else {
+              showMessageInBlock(
+                  'analyze-information-block',
+                  'Відсутні необхідні дані для автентифікації. Спробуйте започаткувати сесію ще раз',
+                  'red'
+              );
+            }
+
+            document.getElementById('spinner').style.display = 'none';
+          }
+
+          function drawUnfollowersTable(unfollowers) {
+            const table = document.createElement('table');
+            const tableHeader = document.createElement('thead');
+            tableHeader.innerHTML = '<tr><th>Avatar</th><th>Name</th><th>Description</th><th>Link to Profile</th></tr>';
+            table.appendChild(tableHeader);
+
+            const tableBody = document.createElement('tbody');
+            unfollowers.forEach(user => {
+              const tableRow = document.createElement('tr');
+
+              tableRow.innerHTML =
+                  `<td><img src="${user['avatar']}" alt="Avatar"></td>
+                    <td class="td-name">${user.displayName}</td>
+                    <td>${user.description}</td>
+                    <td><a href="https://bsky.app/profile/${user.handle}" target="_blank">@${user.handle}</a></td>`;
+
+              tableBody.appendChild(tableRow);
+              table.appendChild(tableBody);
+            });
+
+            const analyzeInformationBlock = document.getElementById('table-block');
+            analyzeInformationBlock.innerHTML = '';
+            analyzeInformationBlock.appendChild(table);
+          }
+
+          function initializeSession() {
+            const handleValue = document.getElementById('handle').value;
+            const appPasswordValue = document.getElementById('appPassword').value;
+
+            if (handleValue && appPasswordValue) {
+              const requestBody = JSON.stringify({
+                "identifier": handleValue,
+                "password": appPasswordValue
+              });
+
+              fetch('https://bsky.social/xrpc/com.atproto.server.createSession', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json'
+                },
+                body: requestBody
+              })
+              .then(response => response.json())
+              .then(data => {
+                if (!data.error) {
+                  localStorage.setItem('handle', handleValue);
+                  localStorage.setItem('appPassword', appPasswordValue);
+                  localStorage.setItem('token', data['accessJwt']);
+
+                  showMessageInBlock('session-information-block', 'Сесію успішно започатковано!', 'green');
+
+                  document.getElementById('analyze-button-block').style.display = 'flex';
+                } else if (data.error && data.message) {
+                  showMessageInBlock('session-information-block',
+                      'Не вдалось отримати дані для автентифікації. Помилка: ' + data.message, 'red');
+                }
+              })
+              .catch(error => {
+                console.error('Error during session initialization:', error);
+              });
+            } else {
+              showMessageInBlock('session-information-block', 'Необхідні для автентикації дані відсутні', 'red');
+            }
+          }
+
+          function findUnfollowers(followers, following) {
+            const followersMap = new Map();
+            const followingMap = new Map();
+
+            followers.forEach(follower => followersMap.set(follower['did'], true));
+            following.forEach(following => followingMap.set(following['did'], true));
+
+            return following.filter(obj => !followersMap.has(obj['did']));
+          }
+
+          async function loadAllUsers(url, did, token) {
+            let userList = [];
+
+            const params = new URLSearchParams();
+            params.append('actor', did);
+            params.append('limit', '100');
+
+            let response = await loadUsers(url, params, token);
+
+            if (url.includes('getFollowers')) {
+              if (response && response['followers']) {
+                userList = response['followers'];
+              }
+            } else if (url.includes('getFollows')) {
+              if (response && response['follows']) {
+                userList = response['follows'];
+              }
+            }
+
+            while (response.cursor) {
+              if (params.has('cursor')) {
+                params.set('cursor', response.cursor);
+              } else {
+                params.append('cursor', response.cursor);
+              }
+
+              response = await loadUsers(url, params, token);
+
+              if (url.includes('getFollowers')) {
+                if (response && response['followers']) {
+                  userList = userList.concat(response['followers']);
+                }
+              } else if (url.includes('getFollows')) {
+                if (response && response['follows']) {
+                  userList = userList.concat(response['follows']);
+                }
+              }
+            }
+
+            return userList;
+          }
+
+          async function loadProfile(handle, token) {
+            const params = new URLSearchParams();
+            params.append('actor', handle);
+
+            const response = await fetch('https://bsky.social/xrpc/app.bsky.actor.getProfile?' + params.toString(), {
+              method: 'GET',
+              headers: {
+                'Authorization': 'Bearer ' + token
+              }
+            });
+
+            return await response.json();
+          }
+
+          async function loadUsers(url, params, token) {
+            const response = await fetch(url + params.toString(), {
+              method: 'GET',
+              headers: {
+                'Authorization': 'Bearer ' + token
+              }
+            });
+
+            return await response.json();
+          }
+
+          function showMessageInBlock(id, message, color) {
+            const block = document.getElementById(id);
+            block.textContent = message;
+            block.style.color = color;
+            block.style.display = 'flex';
+
+            setTimeout(function () {
+              block.style.display = 'none';
+              block.textContent = '';
+            }, 3000);
+          }
+        </script>
+    </body>
+
+</html>
